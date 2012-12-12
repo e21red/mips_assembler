@@ -1,7 +1,25 @@
 package main
 
-import "fmt"
+import (
+//	"assembler"
+	"fmt"
+	"ioutil"
+	"os"
+	"strings"
+)
 
 func main() {
-	fmt.Println("hello")
+	content, err := iotuil.ReadFile(os.Args[1])
+	if err != nil {
+		fmt.Println("Error Reading File:", err)
+		return
+	}
+	lines := strings.Split(string(content), "\n")
+
+	/* Assemble, get symbols for header */
+	
+	/* Print header */
+
+	/* Print bytes  */
+
 }
