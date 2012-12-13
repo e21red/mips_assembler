@@ -17,9 +17,13 @@ func main() {
 	lines := strings.Split(string(content), "\n")
 
 	/* Assemble, get symbols for header */
-	
-	/* Print header */
+	// assembler.assemble
 
+	/* Print header */
+	// header := assembler.header()
+		// fmt.Print(header)
+	
 	/* Print bytes  */
+		//fmt.print(assembler.body)
 
 }
