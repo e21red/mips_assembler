@@ -17,13 +17,15 @@ func main() {
 	lines := strings.Split(string(content), "\n")
 
 	/* Assemble, get symbols for header */
-	// assembler.assemble
+	machineCode := assembler.Assemble(lines)
 
 	/* Print header */
-	// header := assembler.header()
+		// header := assembler.header()
 		// fmt.Print(header)
 	
 	/* Print bytes  */
-		//fmt.print(assembler.body)
+	for _, command := range machineCode {
+		fmt.Printf("%s", command)
+	}
 
 }
