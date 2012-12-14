@@ -2,6 +2,7 @@ package assembler
 
 import (
 	"fmt"
+	"header"
 	"opcodes"
 	"regexp"
 	"strconv"
@@ -9,12 +10,16 @@ import (
 	)
 
 /*
- * Strips off everything from a line after a semicolon. Woe to you if you have a semicolon in a string and don't escape it.
+ * Strips off everything from a line after a semicolon. 
+ * Woe to you if you have a semicolon in a string and don't escape it.
+ * Also gets rid of blank lines
  */
 func removeComments(input []string) (output []string) {
-	re := regexp.MustCompile("[^\\];.+")
+	re := regexp.MustCompile("[^\\\\];.+")
 	for _, line := range input {
-		output = append(output, string(re.ReplaceAll([]byte(line), []byte(" "))))
+		if line != "" {
+			output = append(output, string(re.ReplaceAll([]byte(line), []byte(" "))))
+		}
 	}
 	return output
 }
@@ -23,80 +28,78 @@ func removeComments(input []string) (output []string) {
  * Take in the lines of assembly code and produce the corresponding machine code. Expects the machine code to follow a
  * specific format, which is detailed in the readme. Does not handle pseudo-ops. Returns an array of individual machine instructions.
  */
-func Assemble(input []string) (output []string) {
+func Assemble(input []string) (output []string, symbols map[string]header.Entry, cmds int) {
 	WORDSIZE := 4
 	OPCODES := opcodes.OPCODES()
 	REGISTERS := opcodes.REGISTERS()
-
-	input = RemoveComments(input)
-
+	
+	input = removeComments(input)
+	symbols = make(map[string]header.Entry)
 	// first pass for loop to grab .data, .asciiz
-	symbols := make(map[string]uint16)
 	var (
 		symbol string
 		lc uint16
 		data bool
 	)
-
+	
 	// First pass to find all our symbols
 	for linenum, line := range input {
+		fields := strings.Fields(line)
 		if data {
 			/* Now, we require all variable declarations to be of the form name: .type 16 */
-			fields := strings.Fields(line)
 			for i, field := range fields {
 				if field[0] == '.' {
 					symbol = strings.TrimRight(fields[i-1], ":")
-					fmt.Println(lc)
-					symbols[symbol] = lc // Instruction address
-
+					oldlc := lc
 					if field == ".space" { 
 						conv, _ := strconv.Atoi(fields[i+1])
 						lc += uint16(conv)
 					} else if field == ".word" {
-						fmt.Println(line)
 						lc +=  uint16(WORDSIZE * len(strings.Split(fields[i+1], ",")))
 					} else if field == ".asciiz" {
+						fields[i+1] = strings.Trim(fields[i+1], "\"")
 						lc += uint16(len(fields[i+1]) + 1)
 					} else {
 						fmt.Println("Invalid instruction", field, "at line",linenum)
+						break
 					}
+					symbols[symbol] = header.Entry{uint32(lc), uint32(lc - oldlc), []byte(fields[i+1]), true} // Instruction address
 				}
 			}
-			fmt.Println("lc =", lc)
+		} else {
+			if strings.Contains(fields[0], ":") {
+				symbols[symbol] = header.Entry{uint32(lc), 4, []byte("0000"), false} // Nobody cares what the data is, just better be 32 long, so 4-byte array
+			}
+			cmds++
 		}
-		if data && !strings.Contains(line, ".text") {
+		if data && strings.Contains(line, ".text") {
+			cmds--
 			data = false
 		}
 		if !data && strings.Contains(line, ".data") {
+			cmds--
 			data = true
 		}
 		lc += 4
 	}
-	
+
 	data = false
 	// second pass to replace and assemble
 	for linenum, line := range input {
-		if data && !strings.Contains(line, ".text") {
-			data = false
-		}
-		if !data && strings.Contains(line, ".data") {
-			data = true
-		}
-
-		if data {
-			break
-		}
-
 		var bytecode string
 		
 		line = strings.Replace(line, ",", "", -1)
 		fields := strings.Fields(line)		
-		
+		fields[0] = strings.ToUpper(fields[0])
+
 		op, fn, ft := codename(fields[0], OPCODES, linenum)
+		if op == -1 {
+			break
+		}
 		switch ft {
 		case 0:
 			// No-op, all zeroes
-			bytecode = fmt.Sprintf("%32b", 0)
+			bytecode = fmt.Sprintf("%032b", 0)
 		case 1:		
 			// R-type, arithmetic ops
 			bytecode = fmt.Sprintf("%06b%05b%05b%05b%05b%06b", op, regname(fields[3], REGISTERS, linenum), regname(fields[1], REGISTERS, linenum), regname(fields[2], REGISTERS, linenum), 0, fn)
@@ -105,7 +108,7 @@ func Assemble(input []string) (output []string) {
 			bytecode = fmt.Sprintf("%06b%05b%05b%05b%05b%06b", op, regname(fields[1], REGISTERS, linenum), regname(fields[2], REGISTERS, linenum), 0, 0, fn)
 		case 3:
 			// R-type, shift without variable
-			bytecode = fmt.Sprintf("%06b%05b%05b%05b%05b%06b", op, 0, regname(fields[2], REGISTERS, linenum), regname(fields[1], REGISTERS, linenum), fields[3], fn)
+			bytecode = fmt.Sprintf("%06b%05b%05b%05b%05b%06b", op, 0, regname(fields[2], REGISTERS, linenum), regname(fields[1], REGISTERS, linenum), immediate(fields[3], symbols), fn)
 		case 4:
 			// R-type, shift with variable
 			bytecode = fmt.Sprintf("%06b%05b%05b%05b%05b%06b", op, regname(fields[3], REGISTERS, linenum), regname(fields[2], REGISTERS, linenum), regname(fields[1], REGISTERS, linenum), 0, fn)
@@ -126,9 +129,9 @@ func Assemble(input []string) (output []string) {
 			bytecode = fmt.Sprintf("%06b%05b%05b%016b", op, regname(fields[1], REGISTERS, linenum), 0, immediate(fields[2], symbols))
 		case 10:
 			// I-type, using parenthesized offsets
-			items := strings.Split(fields[2], "(")
-			ofs := strings.Trim(items[2], ")")
-			bytecode = fmt.Sprintf("%06b%05b%05b%016b", op, regname(items[1], REGISTERS, linenum), regname(fields[1], REGISTERS, linenum), immediate(ofs, symbols))
+			items := strings.Split(fields[2], ")")
+			ofs := strings.Trim(items[0], "(")
+			bytecode = fmt.Sprintf("%06b%05b%05b%016b", op, immediate(items[1], symbols), regname(fields[1], REGISTERS, linenum), immediate(ofs, symbols))
 		case 11:
 			// I-type LUI
 			bytecode = fmt.Sprintf("%06b%05b%05b%016b", op, 0, regname(fields[1], REGISTERS, linenum), immediate(fields[2], symbols))
@@ -141,11 +144,12 @@ func Assemble(input []string) (output []string) {
 		case 14:
 			// Syscall
 			bytecode = fmt.Sprintf("%06b%020b%06b", op, 0, fn)
+		default:
+			break
 		}
-		
 		output = append(output, bytecode)
 	}
-	return output
+	return output, symbols, cmds
 }
 
 /*
@@ -155,7 +159,7 @@ func Assemble(input []string) (output []string) {
 func codename(code string, OPCODES map[string]opcodes.Byterep, linenum int) (int, int, int) {	
 	_, exists := OPCODES[code]
 	if !exists {
-		fmt.Println("Error: command", code, "not found, line", linenum)
+		return -1,-1,-1
 	}
 
 	bytes := OPCODES[code]
@@ -185,17 +189,10 @@ func twosComplement(s string) uint16 {
 /*
  * Decides whether of not to treat an immediate value in an I-type operation as a memory ref or a constant
  */
-func immediate(s string, symbols map[string]uint16) uint16 {
+func immediate(s string, symbols map[string]header.Entry) uint16 {
 	_, ok := symbols[s]
 	if ok {
-		fmt.Println(symbols[s])
-		return symbols[s]
+		return uint16(symbols[s].Location) // Dangerous looking, but will work because it was 16 bits to start with
 	}
 	return twosComplement(s)
-}
-
-
-
-func Header(map[string]uint16) string {
-	
 }

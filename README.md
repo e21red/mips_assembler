@@ -5,10 +5,11 @@ Golang implementation of a mips assembler, by Carl Butt, Abhinav Shrestha, Shank
 
 Expects assembly in a certain format:
 
-1) No pseduo-instructions permitted.
-2) All data declarations must be one line. e.g. myNum: .word 2
-3) Only .asciiz, .word, and .space are supported as data types.
-4) Requires that semicolons in .asciiz definitions by escaped by a backslash, will treat them as comments otherwise.
+1) It must be well-formed MIPS assembly code
+2) No pseduo-instructions permitted.
+3) All data declarations must be one line. e.g. myNum: .word 2
+4) Only .asciiz, .word, and .space are supported as data types.
+5) Requires that semicolons in .asciiz definitions by escaped by a backslash, will treat them as comments otherwise.
 
 Accepts the name of an input file, will assemble to the binary file asm.out.
 
